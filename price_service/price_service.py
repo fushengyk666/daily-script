@@ -14,14 +14,14 @@ from matplotlib.ticker import FuncFormatter
 app = FastAPI()
 
 # 初始化交易所
-exchanges = {
-    "binance": ccxt.binance(),
-    "okx": ccxt.okx(),
-    "huobi": ccxt.bybit(),
-    "bitget": ccxt.bitget(),
-    "gate": ccxt.gate(),
-    "huobi": ccxt.huobi(),
-}
+exchanges = [
+    ccxt.binance(),
+    ccxt.bybit(),
+    ccxt.okx(),
+    ccxt.bitget(),
+    ccxt.gate(),
+    ccxt.huobi(),
+]
 
 
 @app.get("/coin_price_info")
@@ -71,7 +71,7 @@ async def coin_price_info(
 
 def get_spot(symbol):
     spot_symbol = f"{symbol}/USDT"
-    for name, exchange in exchanges.items():
+    for exchange in exchanges:
         try:
             ticker = exchange.fetch_ticker(spot_symbol)
             price = ticker["last"]
@@ -86,7 +86,7 @@ def get_spot(symbol):
 
             return msg, img_base64, price
         except Exception as e:
-            print(f"[{name}] 获取 {spot_symbol} 失败: {e}")
+            print(f"[{exchange.id}] 获取 {spot_symbol} 失败: {e}")
             continue
 
 
@@ -101,7 +101,7 @@ def get_future(symbol):
     future_symbol = f"{symbol.upper()}/USDT:USDT"
 
     # 遍历全局定义的交易所字典
-    for name, exchange in exchanges.items():
+    for exchange in exchanges:
         try:
             # 1. 获取 Ticker 数据 (价格、涨跌幅)
             ticker = exchange.fetch_ticker(future_symbol)
@@ -132,7 +132,7 @@ def get_future(symbol):
 
         except Exception as e:
             # 如果当前交易所失败，打印错误并尝试下一个
-            print(f"[{name}] 获取 {future_symbol} 数据失败: {e}")
+            print(f"[{exchange.id}] 获取 {future_symbol} 数据失败: {e}")
             continue
 
 
