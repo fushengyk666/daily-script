@@ -48,7 +48,7 @@ async def coin_price_info(
                     (spread / spot_price) * 100 if spot_price != 0 else 0
                 )
                 if spread_percentage != 0:
-                    spread_msg = f"价差: {spread_percentage:+.2f}%"
+                    spread_msg = f"价差: {spread_percentage:.2f}%"
                     msg_parts.append(spread_msg)
 
             if not msg_parts:
