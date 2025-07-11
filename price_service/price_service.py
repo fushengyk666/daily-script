@@ -77,7 +77,7 @@ def get_spot(symbol):
             price = ticker["last"]
             change = ticker["percentage"]
             msg = (
-                f"{symbol} ${exchange.price_to_precision(spot_symbol, price)}"
+                f"${exchange.price_to_precision(spot_symbol, price)}"
                 + ("📈" if change >= 0 else "📉")
                 + f"{change:+.2f}% ({exchange.id})"
             )
@@ -123,7 +123,7 @@ def get_future(symbol):
 
             # 4. 格式化输出字符串
             msg = (
-                f"{symbol} ${exchange.price_to_precision(future_symbol, price)}"
+                f"${exchange.price_to_precision(future_symbol, price)}"
                 + ("📈" if change >= 0 else "📉")
                 + f"{change:+.2f}% ({exchange.id})\n"
                 f"费率: {funding_rate * 100:.4f}% | 下次结算: {next_funding_str} "
