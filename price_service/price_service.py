@@ -9,7 +9,7 @@ import io
 import base64
 import mplfinance as mpf
 import matplotlib
-from matplotlib.ticker import FuncFormatter
+import matplotlib.ticker as mticker # 確保導入ticker
 
 app = FastAPI()
 
@@ -23,16 +23,21 @@ exchanges = [
     ccxt.huobi(),
 ]
 
-
 @app.get("/coin_price_info")
 async def coin_price_info(
     symbol: str = Query(..., description="币种名称，如BTC"),
-    arg: Optional[str] = Query(None, description="可选参数"),
+    arg: Optional[str] = Query(None, description="可选参数，提供任何值以获取合约信息"),
 ):
+    """
+    提供幣種的現貨和合約價格資訊。
+    - 預設只返回現貨價格和K線圖。
+    - 當提供了 'arg' 參數時，會額外返回合約價格和價差。
+    """
     symbol = symbol.upper()
     try:
+        spot_msg, spot_img_base64, spot_price = get_spot(symbol)
+
         if arg:
-            spot_msg, spot_img_base64, spot_price = get_spot(symbol)
             future_msg, future_price = get_future(symbol)
 
             msg_parts = []
@@ -41,185 +46,206 @@ async def coin_price_info(
             if future_msg:
                 msg_parts.append(f"合约: {future_msg}")
 
-            # 当且仅当现货和合约价格都可用时，计算并添加价差信息
+            # 當且僅當現貨和合約價格都可用時，計算並添加價差信息
             if spot_price is not None and future_price is not None:
                 spread = future_price - spot_price
-                spread_percentage = abs(
-                    (spread / spot_price) * 100 if spot_price != 0 else 0
-                )
+                spread_percentage = abs((spread / spot_price) * 100 if spot_price != 0 else 0)
                 if spread_percentage != 0:
                     spread_msg = f"价差: {spread_percentage:.2f}%"
                     msg_parts.append(spread_msg)
 
             if not msg_parts:
-                # 如果现货和合约信息都获取失败
-                raise HTTPException(
-                    status_code=404, detail=f"未找到 {symbol} 的任何价格信息"
-                )
+                raise HTTPException(status_code=404, detail=f"未找到 {symbol} 的任何價格信息")
 
             final_msg_body = "\n\n".join(msg_parts)
-            msg = f"{symbol}\n{final_msg_body}"
+            final_msg = f"{symbol}\n{final_msg_body}"
 
-            return {"text": msg, "image_base64": spot_img_base64}
-        else:
-            spot_msg, spot_img_base64, price = get_spot(symbol)
-            return {"text": spot_msg, "image_base64": spot_img_base64}
+            return JSONResponse(content={"text": final_msg, "image_base64": spot_img_base64})
+        
+        # 預設情況：只返回現貨資訊
+        if not spot_msg:
+             raise HTTPException(status_code=404, detail=f"未找到 {symbol} 的現貨價格信息")
+        return JSONResponse(content={"text": f"{symbol}\n{spot_msg}", "image_base64": spot_img_base64})
+
     except Exception as e:
-        print(f"获取 {symbol} 价格信息失败: {e}")
-        raise HTTPException(status_code=404, detail=f"未找到 {symbol} 的价格信息")
+        print(f"獲取 {symbol} 價格資訊失敗: {e}")
+        raise HTTPException(status_code=500, detail=f"處理 {symbol} 請求時發生內部錯誤")
 
 
 def get_spot(symbol):
+    """獲取現貨價格、K線圖和原始價格"""
     spot_symbol = f"{symbol}/USDT"
     for exchange in exchanges:
         try:
             ticker = exchange.fetch_ticker(spot_symbol)
+            if spot_symbol != ticker["symbol"]:
+                continue
             price = ticker["last"]
             change = ticker["percentage"]
             msg = (
-                f"${exchange.price_to_precision(spot_symbol, price)}"
+                f"${exchange.price_to_precision(spot_symbol, price)} "
                 + ("📈" if change >= 0 else "📉")
-                + f"{change:+.2f}% ({exchange.id})"
+                + f" {change:+.2f}% ({exchange.id})"
             )
-
+            # 調用修改後的K線圖生成函數
             img_base64 = generate_kline_image(exchange, spot_symbol)
-
-            return msg, img_base64, price
+            if img_base64:
+                return msg, img_base64, price
         except Exception as e:
-            print(f"[{exchange.id}] 获取 {spot_symbol} 失败: {e}")
+            print(f"[{exchange.id}] 獲取 {spot_symbol} 失敗: {e}")
             continue
+    return None, None, None
 
 
 def get_future(symbol):
-    """
-    获取单一币种的合约价格、24小时涨跌幅、资金费率和下次结算时间。
-    函数会自动遍历支持的交易所，直到成功获取数据为止。
-
-    :param symbol: 币种名称, 如 'BTC'
-    :return: 格式化后的信息字符串或 None
-    """
+    """獲取合約價格、資金費率等資訊"""
     future_symbol = f"{symbol.upper()}/USDT:USDT"
-
-    # 遍历全局定义的交易所字典
     for exchange in exchanges:
         try:
-            # 1. 获取 Ticker 数据 (价格、涨跌幅)
             ticker = exchange.fetch_ticker(future_symbol)
             price = ticker["last"]
             change = ticker["percentage"]
-
-            # 2. 获取资金费率数据
             funding_info = exchange.fetch_funding_rate(future_symbol)
             funding_rate = funding_info["fundingRate"]
             next_funding_timestamp = funding_info["fundingTimestamp"]
-
-            # 3. 将下次结算的毫秒时间戳转换为北京时间 (UTC+8)
             tz_utc8 = timezone(timedelta(hours=8))
-            next_funding_dt = datetime.fromtimestamp(
-                next_funding_timestamp / 1000, tz=tz_utc8
-            )
-            # 只显示小时和分钟，通常更实用
+            next_funding_dt = datetime.fromtimestamp(next_funding_timestamp / 1000, tz=tz_utc8)
             next_funding_str = next_funding_dt.strftime("%H:%M")
-
-            # 4. 格式化输出字符串
             msg = (
-                f"${exchange.price_to_precision(future_symbol, price)}"
+                f"${exchange.price_to_precision(future_symbol, price)} "
                 + ("📈" if change >= 0 else "📉")
-                + f"{change:+.2f}% ({exchange.id})\n"
-                f"费率: {funding_rate * 100:.4f}% | 下次结算: {next_funding_str} "
+                + f" {change:+.2f}% ({exchange.id})\n"
+                f"费率: {funding_rate * 100:.4f}% | 下次结算: {next_funding_str}"
             )
             return msg, price
-
         except Exception as e:
-            # 如果当前交易所失败，打印错误并尝试下一个
-            print(f"[{exchange.id}] 获取 {future_symbol} 数据失败: {e}")
+            print(f"[{exchange.id}] 獲取 {future_symbol} 數據失敗: {e}")
             continue
+    return None, None
 
+# ==============================================================================
+# ✨ 使用與前例相同的邏輯，修改 K 線圖生成函數 ✨
+# ==============================================================================
+def generate_kline_image(exchange, symbol: str) -> Optional[str]:
+    """
+    最終修復版：生成帶有完整均線的專業K線圖，並返回base64字串。
+    """
+    # --- 主要設定 ---
+    TIMEFRAME = "15m"
+    LIMIT = 96
+    MA_PERIODS = (6, 12, 42)
+    WATERMARK_TEXT = "Generated by Fushengyk"
 
-def generate_kline_image(exchange, symbol):
     try:
-        ohlcv = exchange.fetch_ohlcv(symbol, timeframe="15m", limit=96)
-
+        # 1. 獲取包含額外歷史數據的K線數據
+        ohlcv = exchange.fetch_ohlcv(symbol, TIMEFRAME, limit=LIMIT + max(MA_PERIODS))
         df = pd.DataFrame(
             ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"]
         )
+        if df.empty:
+            return None
+
+        # 2. 處理時間戳
         df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
         df["timestamp"] = (
-            df["timestamp"].dt.tz_localize("UTC").dt.tz_convert("Asia/Shanghai")
+            df["timestamp"].dt.tz_localize("UTC").dt.tz_convert("Asia/Taipei")
         )
         df.set_index("timestamp", inplace=True)
+        
+        # <<< 修改點 1: 先在完整的 DataFrame 上計算好 MA >>>
+        for period in MA_PERIODS:
+            df[f'ma{period}'] = df['close'].rolling(window=period).mean()
 
-        high_price = df["high"].max()
-        low_price = df["low"].min()
-        current_price = df["close"].iloc[-1]
-
-        marker_high = pd.Series(np.nan, index=df.index)
-        marker_low = pd.Series(np.nan, index=df.index)
-        marker_current = pd.Series(np.nan, index=df.index)
-
-        marker_high.loc[df[df["high"] == high_price].index[0]] = high_price
-        marker_low.loc[df[df["low"] == low_price].index[0]] = low_price
-        marker_current.loc[df.index[-1]] = current_price
-
-        high_str = exchange.price_to_precision(symbol, high_price)
-        low_str = exchange.price_to_precision(symbol, low_price)
-        current_str = exchange.price_to_precision(symbol, current_price)
-
+        # <<< 修改點 2: 在計算完所有指標後，再截取需要繪製的部分 >>>
+        df_plot = df.iloc[-LIMIT:]
+        
+        # 3. 準備統計資訊與Y軸範圍 (使用截斷後的 df_plot)
+        high_price = df_plot['high'].max()
+        low_price = df_plot['low'].min()
+        current_price = df_plot['close'].iloc[-1]
+        high_price_str = exchange.price_to_precision(symbol, high_price)
+        low_price_str = exchange.price_to_precision(symbol, low_price)
+        current_price_str = exchange.price_to_precision(symbol, current_price)
+        stats_text = (
+            f"High: ${high_price_str}\n"
+            f"Low:  ${low_price_str}\n"
+            f"Now:  ${current_price_str}"
+        )
+        price_range = high_price - low_price
+        padding = price_range * 0.04
+        ylim_bottom = low_price - padding
+        ylim_top = high_price + padding
+        
+        # 4. 定義專業的「報告級」淺色風格
+        mc = mpf.make_marketcolors(
+            up='#00B050', down='#C70039', edge='inherit', wick='inherit',
+            volume={'up': '#00B050', 'down': '#C70039'}
+        )
+        mav_colors = ['#00BFFF', '#FF8C00', '#DA70D6']
+        pro_light_style = mpf.make_mpf_style(
+            base_mpf_style='yahoo', marketcolors=mc,
+            facecolor='#FFFFFF', figcolor='#F6F6F6',
+            gridcolor='#E0E0E0', gridstyle='-',
+            y_on_right=False,
+            rc={'axes.labelcolor': 'black', 'xtick.color': 'black', 'ytick.color': 'black', 'text.color': 'black'}
+        )
+        
+        # <<< 修改點 3: 使用 addplot 參數來繪製我們手動計算好的 MA >>>
         addplots = [
-            mpf.make_addplot(
-                marker_high,
-                scatter=True,
-                markersize=50,
-                marker="^",
-                color="red",
-                label=f"High: ${high_str}",
-            ),
-            mpf.make_addplot(
-                marker_low,
-                scatter=True,
-                markersize=50,
-                marker="v",
-                color="green",
-                label=f"Low: ${low_str}",
-            ),
-            mpf.make_addplot(
-                marker_current,
-                scatter=True,
-                markersize=50,
-                marker="o",
-                color="purple",
-                label=f"Current: ${current_str}",
-            ),
+            mpf.make_addplot(df_plot[f'ma{period}'], color=mav_colors[i])
+            for i, period in enumerate(MA_PERIODS)
         ]
 
+        # 5. 繪製圖表 (使用 addplot 替代 mav)
         fig, axlist = mpf.plot(
-            df,
-            type="candle",
-            style="binance",
-            addplot=addplots,
-            title=f"{symbol} ({exchange.id})",
-            ylabel="Price (USDT)",
-            datetime_format="%H:%M",
-            figsize=(12, 8),
-            returnfig=True,
+            df_plot, # 使用截斷後的 df_plot 進行繪圖
+            type="candle", 
+            style=pro_light_style,
+            ylabel="Price (USDT)", 
+            ylabel_lower="Volume",
+            addplot=addplots, # <<< 使用 addplot 繪製額外指標
+            # mav=MA_PERIODS, # <<< 不再需要此參數
+            volume=True, 
+            ylim=(ylim_bottom, ylim_top),
+            datetime_format="%H:%M", 
+            xrotation=0, 
+            figsize=(14, 9),
+            panel_ratios=(10, 3), 
+            returnfig=True, 
+            tight_layout=True
         )
 
-        ax = axlist[0]
-        ax.yaxis.set_major_formatter(
-            FuncFormatter(lambda x, _: exchange.price_to_precision(symbol, x))
+        # 6. 手動設置面板、座標軸和文字
+        main_ax, volume_ax = axlist[0], axlist[2]
+        volume_ax.set_facecolor('#F5F5F5')
+        fig.subplots_adjust(hspace=0.0)
+        
+        locator = mticker.MaxNLocator(nbins=5, prune='both')
+        main_ax.xaxis.set_major_locator(locator)
+
+        fig.suptitle(f"{symbol} ({exchange.id})", y=0.97, fontsize=16, color='black')
+        bbox_props = dict(boxstyle="round,pad=0.4", facecolor="#E0E0E0", alpha=0.7)
+        main_ax.text(0.02, 0.98, stats_text, transform=main_ax.transAxes, fontsize=10,
+                     verticalalignment='top', bbox=bbox_props, color='black')
+        main_ax.yaxis.set_major_formatter(
+            matplotlib.ticker.FuncFormatter(lambda x, p: exchange.price_to_precision(symbol, x))
         )
 
+        fig.text(0.5, 0.5, WATERMARK_TEXT,
+                 fontsize=40, color='darkgray', alpha=0.15,
+                 ha='center', va='center', rotation=30)
+
+        # 7. 將圖表保存到記憶體中並進行Base64編碼
         buf = io.BytesIO()
-        fig.savefig(buf, dpi=100, bbox_inches="tight")
+        fig.savefig(buf, format='png', dpi=120, bbox_inches='tight', facecolor=fig.get_facecolor())
         buf.seek(0)
-
-        img_base64 = base64.b64encode(buf.read()).decode("utf-8")
-
+        img_base64 = base64.b64encode(buf.getvalue()).decode('utf-8')
         buf.close()
-        matplotlib.pyplot.close(fig)
+        matplotlib.pyplot.close(fig) # 釋放記憶體
 
         return img_base64
 
     except Exception as e:
-        print(f"生成K线图失败: {e}")
+        print(f"生成K線圖失敗 for {symbol}: {e}")
+        # 可以在這裡加入更詳細的錯誤日誌，例如 import traceback; traceback.print_exc()
         return None
