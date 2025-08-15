@@ -10,6 +10,17 @@ services:
       - TZ=Asia/Shanghai
     network_mode: "host"
 
+  alpha-monitor:
+    build: ./alpha_monitor
+    container_name: alpha-monitor
+    command: ["python", "alpha.py"]  # 启动数据监控器
+    volumes:
+      - ./logs/alpha_monitor:/app/logs
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Shanghai
+    network_mode: "host"
+
   exchange-price-service:
     build: ./price_service
     container_name: exchange-price-service
