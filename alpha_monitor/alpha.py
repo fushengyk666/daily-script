@@ -130,7 +130,7 @@ def format_simple(title, airdrops, last_airdrops):
         print(status_tag)
         full_time = f"{i.get('date', '')} {i.get('time', '')}".strip()
         lines.append(
-            f"🪙{i['token']} {status_tag}\n ⏰时间: {full_time}\n ⭐分数: {i['points']}\n 💰数量: {i['amount']}\n 📍地址: {i['contract_address']}"
+            f"🪙{i['token']} {status_tag}\n ⏰时间: {full_time}\n ⭐分数: {i['points']}\n 💰数量: {i['amount']}\n 📍地址: {i['contract_address']}\n"
         )
     return "\n".join(lines)
 
