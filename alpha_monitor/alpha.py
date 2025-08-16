@@ -1,12 +1,38 @@
 import json
 import time
+import os
+import signal
+import sys
 from datetime import datetime, date, timedelta
 import requests
+from loguru import logger
+
+# 配置日志
+logger.remove()
+logger.add(
+    sys.stdout,
+    level="INFO",
+    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+)
 
 API_URL = "https://alpha123.uk/api/data?fresh=1"
+# 本地状态文件路径
+STATE_FILE = "alpha_monitor_state.json"
 # === 🔧 你的 Telegram Bot 配置 ===
 TELEGRAM_TOKEN = "7980319366:AAGCms_00Uxk74QEYuJln822LFAUOX-idso"  # 替换为你的
 TELEGRAM_CHAT_ID = "-4882200173"  # 替换为你的 Chat ID
+
+# 全局变量用于信号处理
+current_last_today = []
+current_last_forecast = []
+
+
+def signal_handler(signum, frame):
+    """处理程序退出信号，保存当前状态"""
+    logger.info(f"[信号] 收到退出信号 {signum}，正在保存状态...")
+    save_state(current_last_today, current_last_forecast)
+    logger.info("[信号] 状态已保存，程序退出")
+    sys.exit(0)
 
 
 def send_telegram_message(message):
@@ -15,9 +41,63 @@ def send_telegram_message(message):
     try:
         response = requests.post(url, data=payload)
         if response.status_code != 200:
-            print(f"❗ Telegram 发送失败: {response.text}")
+            logger.error(f"❗ Telegram 发送失败: {response.text}")
     except Exception as e:
-        print(f"❗ Telegram 请求异常: {e}")
+        logger.error(f"❗ Telegram 请求异常: {e}")
+
+
+def save_state(last_today, last_forecast):
+    """保存状态到本地文件"""
+    try:
+        state = {
+            "last_today": last_today,
+            "last_forecast": last_forecast,
+            "last_update": datetime.now().isoformat()
+        }
+        with open(STATE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(state, f, ensure_ascii=False, indent=2)
+        logger.info(f"[状态] 已保存到 {STATE_FILE}")
+    except Exception as e:
+        logger.error(f"[错误] 保存状态失败: {e}")
+
+
+def load_state():
+    """从本地文件加载状态"""
+    if not os.path.exists(STATE_FILE):
+        logger.info(f"[状态] {STATE_FILE} 不存在，将使用空状态")
+        return [], []
+    
+    try:
+        with open(STATE_FILE, 'r', encoding='utf-8') as f:
+            state = json.load(f)
+        last_today = state.get("last_today", [])
+        last_forecast = state.get("last_forecast", [])
+        last_update = state.get("last_update", "未知")
+        
+        # 清理过期的今日空投数据（只保留今天的）
+        today = date.today()
+        cleaned_today = []
+        for item in last_today:
+            item_date = item.get("date")
+            if item_date:
+                try:
+                    parsed_date = datetime.strptime(item_date, "%Y-%m-%d").date()
+                    if parsed_date == today:
+                        cleaned_today.append(item)
+                except:
+                    pass
+
+        logger.info(f"[状态] 已从 {STATE_FILE} 加载状态，上次更新: {last_update}")
+        logger.info(f"[状态] 加载了 {len(cleaned_today)} 个今日空投，{len(last_forecast)} 个预告空投")
+
+        # 如果清理后数据有变化，立即保存
+        if len(cleaned_today) != len(last_today):
+            logger.info(f"[状态] 清理了 {len(last_today) - len(cleaned_today)} 个过期的今日空投")
+
+        return cleaned_today, last_forecast
+    except Exception as e:
+        logger.error(f"[错误] 加载状态失败: {e}，将使用空状态")
+        return [], []
 
 
 def fetch_data():
@@ -76,6 +156,8 @@ def classify_airdrops(data):
             "token": item.get("token", ""),
             "date": item_date,
             "time": item.get("time", ""),
+            "type": item.get("type", ""),
+            "phase": item.get("phase", 1),
             "points": item.get("points", ""),
             "amount": item.get("amount", ""),
             "contract_address": item.get("contract_address", ""),
@@ -91,24 +173,6 @@ def classify_airdrops(data):
     return today_list, forecast_list
 
 
-def detect_changes(old_list, new_list):
-    """标记新增或更新"""
-    old_map = {i["token"]: i for i in old_list}
-    result = []
-    for item in new_list:
-        token = item["token"]
-        if token not in old_map:
-            item["status"] = "新增"
-        elif json.dumps(old_map[token], ensure_ascii=False) != json.dumps(
-            item, ensure_ascii=False
-        ):
-            item["status"] = "更新"
-        else:
-            item["status"] = ""
-        result.append(item)
-    return result
-
-
 def format_simple(title, airdrops, last_airdrops):
     """控制台文案"""
     if not airdrops:
@@ -118,7 +182,6 @@ def format_simple(title, airdrops, last_airdrops):
     lines = [f"【{title}】"]
     for i in airdrops:
         token = i["token"]
-        print(token not in last_map)
         if token not in last_map:
             status_tag = "[新增]"
         elif json.dumps(last_map[token], ensure_ascii=False) != json.dumps(
@@ -127,36 +190,61 @@ def format_simple(title, airdrops, last_airdrops):
             status_tag = "[更新]"
         else:
             status_tag = ""
-        print(status_tag)
-        full_time = f"{i.get('date', '')} {i.get('time', '')}".strip()
+
+        time_desc = ""
+        if i['type'] == "tge":
+            time_desc = "(TGE)"
+        elif str(i['phase']) == "2":
+            time_desc = "(二段)"
+
+        # 格式化时间：只保留月日和小时分钟
+        date_str = i.get('date', '')
+        time_str = i.get('time', '')
+        if date_str and time_str:
+            try:
+                # 解析日期并重新格式化为 MM-DD HH:MM
+                parsed_date = datetime.strptime(date_str, "%Y-%m-%d")
+                formatted_date = parsed_date.strftime("%m-%d")
+                full_time = f"{formatted_date} {time_str}"
+            except:
+                # 如果解析失败，使用原始格式
+                full_time = f"{date_str} {time_str}"
+        else:
+            full_time = f"{date_str} {time_str}".strip()
+            
         lines.append(
-            f"🪙{i['token']} {status_tag}\n ⏰时间: {full_time}\n ⭐分数: {i['points']}\n 💰数量: {i['amount']}\n 📍地址: {i['contract_address']}\n"
+            f"🪙{i['token']} {status_tag}\n ⏰时间: {full_time}{time_desc}\n ⭐分数: {i['points']}\n 💰数量: {i['amount']}\n 📍地址: {i['contract_address']}\n"
         )
     return "\n".join(lines)
 
 
 def main():
-    last_today = []
-    last_forecast = []
+    global current_last_today, current_last_forecast
+    
+    # 注册信号处理器
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    # 从本地文件加载之前的状态
+    last_today, last_forecast = load_state()
+    current_last_today, current_last_forecast = last_today, last_forecast
+
+    logger.info(f"[启动] Alpha 监控程序已启动，监控间隔: 10分钟")
+    logger.info(f"[启动] 状态文件: {STATE_FILE}")
 
     while True:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         data = fetch_data()
         if not data:
+            logger.warning(f"[{now}] 获取数据失败，等待下次重试...")
             time.sleep(600)
             continue
 
         today_data, forecast_data = classify_airdrops(data)
 
         if today_data != last_today or forecast_data != last_forecast:
-            print(today_data)
-            print(last_today)
-            print(today_data != last_today)
-            print(forecast_data)
-            print(last_forecast)
-            print(forecast_data != last_forecast)
+            logger.info(f"[{now}] 今日空投与预告有更新")
 
-            print(f"[{now}] 今日空投与预告有更新")
             if today_data or forecast_data:
                 message = (
                     f"[Alpha网站监控] 今日空投与预告有更新\n\n"
@@ -164,16 +252,18 @@ def main():
                     + "\n\n"
                     + format_simple("空投预告", forecast_data, last_forecast)
                 )
-                # print(message)
+                logger.info(message)
                 send_telegram_message(message)
 
+            # 更新状态并保存到本地文件
             last_today = today_data
             last_forecast = forecast_data
+            current_last_today, current_last_forecast = last_today, last_forecast
+            save_state(last_today, last_forecast)
         else:
-            print(f"[{now}] 今日空投与预告无变化")
+            logger.info(f"[{now}] 今日空投与预告无变化")
 
         time.sleep(600)  # 10分钟
-
 
 
 if __name__ == "__main__":
