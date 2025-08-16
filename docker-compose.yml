@@ -16,6 +16,7 @@ services:
     command: ["python", "alpha.py"]  # 启动数据监控器
     volumes:
       - ./logs/alpha_monitor:/app/logs
+      - ./alpha_monitor/alpha_monitor_state.json:/app/alpha_monitor_state.json
     restart: unless-stopped
     environment:
       - TZ=Asia/Shanghai

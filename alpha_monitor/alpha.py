@@ -1,4 +1,5 @@
 import json
+import random
 import time
 import os
 import signal
@@ -135,15 +136,57 @@ def adjust_phase_times(airdrops):
     return airdrops
 
 
+def process_and_sort_airdrops(data):
+    """处理并排序空投数据"""
+    airdrops = adjust_phase_times(data.get("airdrops", []))
+    
+    processed_airdrops = []
+    for item in airdrops:
+        entry = {
+            "token": item.get("token", ""),
+            "date": item.get("date"),
+            "time": item.get("time", ""),
+            "type": item.get("type", ""),
+            "phase": item.get("phase", 1),
+            "points": item.get("points", ""),
+            "amount": item.get("amount", ""),
+            "contract_address": item.get("contract_address", ""),
+        }
+        processed_airdrops.append(entry)
+    
+    # 排序函数：先按日期时间，再按token名称
+    def sort_key(item):
+        date_str = item.get("date", "")
+        time_str = item.get("time", "")
+        token = item.get("token", "")
+        
+        # 如果没有日期或时间，排在最后
+        if not date_str or not time_str:
+            return ("9999-12-31", "23:59", token)
+        
+        try:
+            # 尝试解析日期时间
+            datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+            return (date_str, time_str, token)
+        except:
+            # 解析失败，排在最后
+            return ("9999-12-31", "23:59", token)
+    
+    # 对整个列表排序
+    processed_airdrops.sort(key=sort_key)
+    return processed_airdrops
+
+
 def classify_airdrops(data):
     """分类今日空投与空投预告"""
     today = date.today()
     tomorrow = today + timedelta(days=1)
     today_list, forecast_list = [], []
 
-    airdrops = adjust_phase_times(data.get("airdrops", []))
+    # 获取处理并排序后的空投数据
+    processed_airdrops = process_and_sort_airdrops(data)
 
-    for item in airdrops:
+    for item in processed_airdrops:
         item_date = item.get("date")
         parsed_date = None
         if item_date:
@@ -152,23 +195,12 @@ def classify_airdrops(data):
             except:
                 parsed_date = None
 
-        entry = {
-            "token": item.get("token", ""),
-            "date": item_date,
-            "time": item.get("time", ""),
-            "type": item.get("type", ""),
-            "phase": item.get("phase", 1),
-            "points": item.get("points", ""),
-            "amount": item.get("amount", ""),
-            "contract_address": item.get("contract_address", ""),
-        }
-
         # 今日空投
         if parsed_date == today:
-            today_list.append(entry)
+            today_list.append(item)
         # 空投预告：明天及以后，或者无日期
         elif parsed_date is None or parsed_date >= tomorrow:
-            forecast_list.append(entry)
+            forecast_list.append(item)
 
     return today_list, forecast_list
 
@@ -263,7 +295,7 @@ def main():
         else:
             logger.info(f"[{now}] 今日空投与预告无变化")
 
-        time.sleep(600)  # 10分钟
+        time.sleep(random.randint(300, 600))  # 10分钟
 
 
 if __name__ == "__main__":

@@ -36,3 +36,7 @@ dist/
 build/
 coverage/
 .idea/
+
+
+#alpha
+alpha_monitor_state.json
