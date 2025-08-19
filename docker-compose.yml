@@ -10,6 +10,17 @@ services:
       - TZ=Asia/Shanghai
     network_mode: "host"
 
+  bwenews-monitor:
+    build: ./bwenews
+    container_name: bwenews-monitor
+    command: ["python", "main.py"]  # 启动数据监控器
+    volumes:
+      - ./logs/bwenews:/app/logs
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Shanghai
+    network_mode: "host"
+
   alpha-monitor:
     build: ./alpha_monitor
     container_name: alpha-monitor
