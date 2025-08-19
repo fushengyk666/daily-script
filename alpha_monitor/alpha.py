@@ -104,11 +104,14 @@ def load_state():
 def fetch_data():
     """从 API 获取数据"""
     try:
-        response = requests.get(API_URL, timeout=10)
+        headers = {
+            'referer': 'https://alpha123.uk/zh/index.html'
+        }
+        response = requests.get(API_URL, headers=headers, timeout=10)
         response.raise_for_status()
         return response.json()
     except Exception as e:
-        print(f"[错误] 抓取失败: {e}")
+        logger.error(f"[错误] 抓取失败: {e}")
         return None
 
 
