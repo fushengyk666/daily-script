@@ -53,9 +53,9 @@ def save_state(last_today, last_forecast):
         state = {
             "last_today": last_today,
             "last_forecast": last_forecast,
-            "last_update": datetime.now().isoformat()
+            "last_update": datetime.now().isoformat(),
         }
-        with open(STATE_FILE, 'w', encoding='utf-8') as f:
+        with open(STATE_FILE, "w", encoding="utf-8") as f:
             json.dump(state, f, ensure_ascii=False, indent=2)
         logger.info(f"[状态] 已保存到 {STATE_FILE}")
     except Exception as e:
@@ -67,14 +67,14 @@ def load_state():
     if not os.path.exists(STATE_FILE):
         logger.info(f"[状态] {STATE_FILE} 不存在，将使用空状态")
         return [], []
-    
+
     try:
-        with open(STATE_FILE, 'r', encoding='utf-8') as f:
+        with open(STATE_FILE, "r", encoding="utf-8") as f:
             state = json.load(f)
         last_today = state.get("last_today", [])
         last_forecast = state.get("last_forecast", [])
         last_update = state.get("last_update", "未知")
-        
+
         # 清理过期的今日空投数据（只保留今天的）
         today = date.today()
         cleaned_today = []
@@ -89,11 +89,15 @@ def load_state():
                     pass
 
         logger.info(f"[状态] 已从 {STATE_FILE} 加载状态，上次更新: {last_update}")
-        logger.info(f"[状态] 加载了 {len(cleaned_today)} 个今日空投，{len(last_forecast)} 个预告空投")
+        logger.info(
+            f"[状态] 加载了 {len(cleaned_today)} 个今日空投，{len(last_forecast)} 个预告空投"
+        )
 
         # 如果清理后数据有变化，立即保存
         if len(cleaned_today) != len(last_today):
-            logger.info(f"[状态] 清理了 {len(last_today) - len(cleaned_today)} 个过期的今日空投")
+            logger.info(
+                f"[状态] 清理了 {len(last_today) - len(cleaned_today)} 个过期的今日空投"
+            )
 
         return cleaned_today, last_forecast
     except Exception as e:
@@ -104,9 +108,7 @@ def load_state():
 def fetch_data():
     """从 API 获取数据"""
     try:
-        headers = {
-            'referer': 'https://alpha123.uk/zh/index.html'
-        }
+        headers = {"referer": "https://alpha123.uk/zh/index.html"}
         response = requests.get(API_URL, headers=headers, timeout=10)
         response.raise_for_status()
         return response.json()
@@ -142,7 +144,7 @@ def adjust_phase_times(airdrops):
 def process_and_sort_airdrops(data):
     """处理并排序空投数据"""
     airdrops = adjust_phase_times(data.get("airdrops", []))
-    
+
     processed_airdrops = []
     for item in airdrops:
         entry = {
@@ -156,17 +158,17 @@ def process_and_sort_airdrops(data):
             "contract_address": item.get("contract_address", ""),
         }
         processed_airdrops.append(entry)
-    
+
     # 排序函数：先按日期时间，再按token名称
     def sort_key(item):
         date_str = item.get("date", "")
         time_str = item.get("time", "")
         token = item.get("token", "")
-        
+
         # 如果没有日期或时间，排在最后
         if not date_str or not time_str:
             return ("9999-12-31", "23:59", token)
-        
+
         try:
             # 尝试解析日期时间
             datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
@@ -174,7 +176,7 @@ def process_and_sort_airdrops(data):
         except:
             # 解析失败，排在最后
             return ("9999-12-31", "23:59", token)
-    
+
     # 对整个列表排序
     processed_airdrops.sort(key=sort_key)
     return processed_airdrops
@@ -227,14 +229,14 @@ def format_simple(title, airdrops, last_airdrops):
             status_tag = ""
 
         time_desc = ""
-        if i['type'] == "tge":
+        if i["type"] == "tge":
             time_desc = "(TGE)"
-        elif str(i['phase']) == "2":
+        elif str(i["phase"]) == "2":
             time_desc = "(二段)"
 
         # 格式化时间：只保留月日和小时分钟
-        date_str = i.get('date', '')
-        time_str = i.get('time', '')
+        date_str = i.get("date", "")
+        time_str = i.get("time", "")
         if date_str and time_str:
             try:
                 # 解析日期并重新格式化为 MM-DD HH:MM
@@ -246,7 +248,7 @@ def format_simple(title, airdrops, last_airdrops):
                 full_time = f"{date_str} {time_str}"
         else:
             full_time = f"{date_str} {time_str}".strip()
-            
+
         lines.append(
             f"🪙{i['token']} {status_tag}\n ⏰时间: {full_time}{time_desc}\n ⭐分数: {i['points']}\n 💰数量: {i['amount']}\n 📍地址: {i['contract_address']}\n"
         )
@@ -255,11 +257,11 @@ def format_simple(title, airdrops, last_airdrops):
 
 def main():
     global current_last_today, current_last_forecast
-    
+
     # 注册信号处理器
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
-    
+
     # 从本地文件加载之前的状态
     last_today, last_forecast = load_state()
     current_last_today, current_last_forecast = last_today, last_forecast
@@ -286,6 +288,8 @@ def main():
                     + format_simple("今日空投", today_data, last_today)
                     + "\n\n"
                     + format_simple("空投预告", forecast_data, last_forecast)
+                    + "\n\n"
+                    + "数据来源：https://alpha123.uk"
                 )
                 logger.info(message)
                 send_telegram_message(message)
