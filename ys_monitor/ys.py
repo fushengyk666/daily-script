@@ -17,8 +17,8 @@ POLL_INTERVAL = 30  # 秒
 processed_alerts = set()
 
 # === 🔧 你的 Telegram Bot 配置 ===
-TELEGRAM_TOKEN = "7980319366:AAGCms_00Uxk74QEYuJln822LFAUOX-idso"  # 替换为你的
-TELEGRAM_CHAT_ID = "-4880921924"  # 替换为你的 Chat ID
+TELEGRAM_TOKEN = ""  # 替换为你的
+TELEGRAM_CHAT_ID = ""  # 替换为你的 Chat ID
 
 
 def send_telegram_message(message):

@@ -20,11 +20,9 @@ API_URL = "https://alpha123.uk/api/data?fresh=1"
 # 本地状态文件路径
 STATE_FILE = "alpha_monitor_state.json"
 # === 🔧 你的 Telegram Bot 配置 ===
-TELEGRAM_TOKEN = "7980319366:AAGCms_00Uxk74QEYuJln822LFAUOX-idso"  # 替换为你的
-TELEGRAM_CHAT_ID = "-4882200173"  # 替换为你的 Chat ID
-
-TELEGRAM_CHAT_ID_NEW = "-1002888916669"
-TELEGRAM_MESSAGE_TREAD_ID_NEW = 15
+TELEGRAM_TOKEN = ""  # 替换为你的
+TELEGRAM_CHAT_ID_NEW = "" # 替换为你的 Chat ID
+TELEGRAM_MESSAGE_TREAD_ID_NEW = 15 # 替换为你的 子标签栏目
 
 # 全局变量用于信号处理
 current_last_today = []
@@ -37,17 +35,6 @@ def signal_handler(signum, frame):
     save_state(current_last_today, current_last_forecast)
     logger.info("[信号] 状态已保存，程序退出")
     sys.exit(0)
-
-
-def send_telegram_message(message):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"}
-    try:
-        response = requests.post(url, data=payload)
-        if response.status_code != 200:
-            logger.error(f"❗ Telegram 发送失败: {response.text}")
-    except Exception as e:
-        logger.error(f"❗ Telegram 请求异常: {e}")
 
 
 def send_telegram_message_new(message):
@@ -312,7 +299,6 @@ def main():
                 )
                 logger.info(message)
                 send_telegram_message_new(message)
-                send_telegram_message(message)
 
             # 更新状态并保存到本地文件
             last_today = today_data
